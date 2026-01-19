@@ -18,7 +18,7 @@ The protocol enforces the following at consensus level:
 * Block ordering by accumulated work
 * Fixed monetary issuance schedule
 * Difficulty retargeting
-* Immutable genesis block
+* Immutable revelation block
 
 All consensus rules are enforced **solely by code and Proof-of-Work**.
 
