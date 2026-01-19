@@ -74,7 +74,7 @@ impl Blockchain {
             let mut genesis = Block {
                 header: BlockHeader {
                     height: 0,
-                    timestamp: 1730000000, // fixed, deterministic
+                    timestamp: 1730000000,
                     prev_hash: vec![0u8; 32],
                     nonce: 0,
                     difficulty: self.difficulty,
