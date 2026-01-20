@@ -13,7 +13,7 @@ use crate::{
     reward::block_reward,
     revelation::revelation_tx,
     merkle::merkle_root,
-    crypto::sha256,
+    crypto::{sha256, verify_signature},
 };
 
 pub struct Blockchain {
@@ -95,6 +95,7 @@ impl Blockchain {
         }
     }
 
+    // ⛏️ MINING — UNCHANGED
     pub fn mine_block(&mut self, miner_key: &str) {
         let height = self.blocks.len() as u64;
         let reward = block_reward(height);
@@ -137,10 +138,48 @@ impl Blockchain {
         self.save_all();
     }
 
-    // ✅ REQUIRED BY P2P
+    // 🔐 OWNERSHIP ENFORCEMENT (NEW)
+    pub fn validate_transaction(&self, tx: &Transaction) -> bool {
+        // Coinbase is always valid
+        if tx.inputs.is_empty() {
+            return true;
+        }
+
+        let sighash = tx.sighash();
+
+        for input in &tx.inputs {
+            let key = format!(
+                "{}:{}",
+                hex::encode(&input.txid),
+                input.index
+            );
+
+            let utxo = match self.utxos.get(&key) {
+                Some(u) => u,
+                None => return false,
+            };
+
+            // RULE 1: ownership hash matches
+            if sha256(&input.pubkey) != utxo.pubkey_hash {
+                return false;
+            }
+
+            // RULE 2: signature valid
+            if !verify_signature(
+                &input.pubkey,
+                &sighash,
+                &input.signature,
+            ) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    // 🔗 BLOCK ACCEPTANCE (NOW ENFORCES OWNERSHIP)
     pub fn validate_and_add_block(&mut self, block: Block) -> bool {
         let expected_height = self.blocks.len() as u64;
-
         let prev = match self.blocks.last() {
             Some(b) => b,
             None => return false,
@@ -162,7 +201,12 @@ impl Blockchain {
             return false;
         }
 
-        // v0.2 — ownership & signatures intentionally NOT enforced yet
+        for tx in &block.transactions {
+            if !self.validate_transaction(tx) {
+                return false;
+            }
+        }
+
         self.blocks.push(block);
         self.rebuild_utxos();
         self.save_all();
