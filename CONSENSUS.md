@@ -1,4 +1,4 @@
-## Consensus Rules (Formal Specification)
+## Consensus Rules 
 
 This document defines the **consensus-critical rules** for **Bitcoin v0.2 — Revelation Edition**.
 
