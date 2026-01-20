@@ -11,3 +11,4 @@ pub mod network;
 mod p2p;
 pub mod merkle;
 mod ui;
+pub mod api;
