@@ -1,205 +1,209 @@
-# 🔗 Node Sync Guide (Public PoW Network)
+# 🔗 How to Sync a Bitcoin v0.2 — Revelation Edition Node
 
-This document explains **how to sync a full node** with the network **while other nodes are actively mining**.
+This guide explains **exactly how a new node syncs automatically over the internet** while other nodes are already mining.
+
+No trusted servers.
+No checkpoints.
+Proof-of-Work decides truth.
 
 Repository:
 [https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2](https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2)
 
 ---
 
-## 🧠 Core Principles
+## 🧠 What “sync” means in this network
 
-* The network **never stops mining**
-* New nodes can **join and sync at any time**
-* Consensus is decided by **cumulative Proof-of-Work**
-* GitHub distributes code — **PoW decides truth**
+When a new node joins, it will:
+
+1. Create or load the local blockchain
+2. Connect to peers over P2P
+3. Request missing blocks
+4. Download blocks from peers
+5. Validate every block locally
+6. Catch up to the current height
+7. Start mining and broadcasting
+
+Mining **never stops** during sync.
 
 ---
 
 ## 0️⃣ Requirements
 
-* Linux / macOS / WSL / Termux
+* Linux / macOS / Windows (WSL) / Termux
 * Rust (stable)
 * Git
-* Internet or private P2P connection
+* Internet connection
+* An open port (default: `8333`)
 
 ---
 
-## 1️⃣ Clone the Public Code
+## 1️⃣ Clone the public repository
 
 ```bash
 git clone https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2.git
 cd bitcoin-0.2
 ```
 
-⚠️ Cloning the repository does **not** grant trust.
-All trust comes from **local validation + PoW**.
+Cloning the repo does **not** give trust.
+Trust comes only from validating Proof-of-Work.
 
 ---
 
-## 2️⃣ Build the Node
+## 2️⃣ Build the node
 
 ```bash
 cargo build --release
 ```
 
-Binary output:
+The binary will be created automatically.
+
+---
+
+## 3️⃣ Start the node
 
 ```bash
-./target/release/bitcoin
+cargo run --release
 ```
 
----
+On first run, the node will:
 
-## 3️⃣ Start Node in Sync Mode
+* Create the `data/` directory
+* Load existing blocks if present
+* Create the genesis block if needed
 
-Sync mode disables mining while the node catches up.
-
-```bash
-./target/release/bitcoin \
-  --node \
-  --sync \
-  --datadir ./data
-```
-
-The node will:
-
-* Connect to peers
-* Exchange chain metadata
-* Compare cumulative difficulty
-* Begin downloading blocks
-
-Mining nodes continue mining during this process.
-
----
-
-## 4️⃣ Peer Discovery
-
-### Option A: Manual Peer Connections
-
-```bash
-./target/release/bitcoin \
-  --node \
-  --sync \
-  --connect 192.168.1.10:8333 \
-  --connect 203.xxx.xxx.xxx:8333
-```
-
-### Option B: Seed Nodes (Recommended)
-
-Seed nodes help initial discovery but **do not control consensus**.
-
-```rust
-const SEED_NODES: &[&str] = &[
-    "seed1.itlcoin.org:8333",
-    "seed2.itlcoin.org:8333",
-];
-```
-
----
-
-## 5️⃣ Headers-First Sync (Fast & Safe)
-
-Sync process:
-
-1. Download block headers
-2. Validate Proof-of-Work per header
-3. Select chain with highest cumulative difficulty
-4. Download full blocks
-
-```
-HEADERS → VALIDATE → BEST CHAIN → BLOCKS
-```
-
-Forks are resolved automatically by cumulative PoW.
-
----
-
-## 6️⃣ Full Block Validation
-
-Every block is validated locally:
-
-* Previous block hash
-* Timestamp rules
-* Proof-of-Work
-* Transaction structure
-* UTXO correctness
-
-❌ No checkpoints
-❌ No trusted nodes
-❌ No GitHub authority
-
----
-
-## 7️⃣ Receiving New Blocks During Sync
-
-This is expected behavior.
-
-* New blocks are queued
-* Sync continues
-* Latest blocks are applied
-* Reorganization happens if required
-
-No restart is needed.
-
----
-
-## 8️⃣ Sync Completion
-
-When synced:
+You will see:
 
 ```text
-[SYNC COMPLETE]
-Height: XXXXX
+⛓ Bitcoin v0.2 — Revelation Edition
+🌐 P2P listening on 0.0.0.0:8333
+🔄 Requesting sync from peers
+```
+
+---
+
+## 4️⃣ Peer connection (automatic)
+
+If peers are reachable, the node will:
+
+* Open TCP connections
+* Exchange messages
+* Remain connected in the background
+
+Peers may be:
+
+* Public internet nodes
+* LAN nodes
+* VPS nodes
+* Home nodes
+
+There is no central server.
+
+---
+
+## 5️⃣ Automatic sync begins
+
+After connecting, the node sends:
+
+```text
+SyncRequest { from_height: <local height> }
+```
+
+Peers respond by sending **real blocks**, not headers or hashes.
+
+For each received block:
+
+* Proof-of-Work is verified
+* Previous hash is checked
+* Merkle root is verified
+* The block is added to the chain
+* UTXO set is rebuilt
+
+You will see output like:
+
+```text
+📥 Sync progress | height 152
+📥 Sync progress | height 153
+```
+
+---
+
+## 6️⃣ Sync completion
+
+Once blocks stop arriving and the height stabilizes:
+
+```text
+✅ Sync complete at height XXX
 ```
 
 The node automatically switches to **normal mode**.
 
+No restart required.
+
 ---
 
-## 9️⃣ Enable Mining (Optional)
+## 7️⃣ Normal operation (after sync)
 
-```bash
-./target/release/bitcoin \
-  --node \
-  --mine \
-  --threads 4
+After syncing, the node will:
+
+* Mine new blocks
+* Broadcast mined blocks to peers
+* Accept blocks mined by others
+* Stay in consensus via PoW
+
+Example output:
+
+```text
+📊 Blockchain Status:
+Height: 1204
+Difficulty: 2
+UTXO Set Size: 1204
+Connected Peers: 5
 ```
 
-Mining never interferes with syncing or validation.
+---
+
+## 8️⃣ Restarting a node (fast sync)
+
+If you stop and restart the node:
+
+* Blocks are loaded from `data/blocks.json`
+* UTXOs are loaded from `data/utxos.json`
+* Sync resumes only if new blocks exist
+
+This makes restarts fast.
 
 ---
 
-## 🔐 Security Rules (Mandatory)
+## 🔐 Important rules (do not break)
 
-* Trust cumulative Proof-of-Work only
-* Validate everything locally
-* Maintain multiple peers
-* Support automatic chain reorganization
-* No admin keys
-* No forced updates
-
----
-
-## 🔄 Updating the Software
-
-```bash
-git fetch
-git pull
-cargo build --release
-```
-
-⚠️ Consensus rule changes cause forks.
-Users always choose which rules to run.
+* Do not edit `blocks.json`
+* Do not skip block validation
+* Do not trust GitHub commits for consensus
+* Do not assume longest chain = best chain
+* Proof-of-Work always wins
 
 ---
 
-## 🧩 Mental Model
+## 🧩 Current limitations (v0.2)
 
-> GitHub distributes software
+This version intentionally keeps things simple:
+
+* No headers-first sync yet
+* No fork reorganization yet
+* No DoS protection yet
+
+These are planned for future versions.
+
+---
+
+## 🧠 Mental model to remember
+
+> GitHub distributes code
 > Proof-of-Work decides consensus
+> Peers exchange blocks
+> Every node verifies everything
 
-This is a decentralized system by design.
+That is decentralization.
 
 ---
 
