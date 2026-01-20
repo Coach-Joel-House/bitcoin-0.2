@@ -1,210 +1,125 @@
-# 🔗 How to Sync a Bitcoin v0.2 — Revelation Edition Node
+# Chain Synchronization
 
-This guide explains **exactly how a new node syncs automatically over the internet** while other nodes are already mining.
+This document describes how nodes discover peers and synchronize the blockchain.
 
-No trusted servers.
-No checkpoints.
-Proof-of-Work decides truth.
-
-Repository:
-[https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2](https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2)
+Synchronization is automatic and requires no central coordinator.
 
 ---
 
-## 🧠 What “sync” means in this network
+## General Behavior
 
-When a new node joins, it will:
+Each node maintains its own copy of the blockchain.
 
-1. Create or load the local blockchain
-2. Connect to peers over P2P
-3. Request missing blocks
-4. Download blocks from peers
-5. Validate every block locally
-6. Catch up to the current height
-7. Start mining and broadcasting
+When a node starts, it will:
 
-Mining **never stops** during sync.
+1. Load its local blockchain from disk
+2. Listen for incoming peer connections
+3. Connect to known peers if configured
+4. Request blocks it does not yet have
+5. Validate received blocks
+6. Extend its chain if the blocks are valid
 
----
-
-## 0️⃣ Requirements
-
-* Linux / macOS / Windows (WSL) / Termux
-* Rust (stable)
-* Git
-* Internet connection
-* An open port (default: `8333`)
+Nodes remain synchronized by continuously exchanging new blocks.
 
 ---
 
-## 1️⃣ Clone the public repository
+## Initial Synchronization
 
-```bash
-git clone https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2.git
-cd bitcoin-0.2
+On startup, a node sends a synchronization request to all connected peers.
+
+The request includes the node’s current block height.
+
+Peers respond by sending all blocks with a height greater than the requester’s height.
+
+Blocks are sent sequentially in ascending order.
+
+---
+
+## Block Validation
+
+Each received block is validated before being accepted.
+
+Validation includes:
+
+* correct reference to the previous block hash
+* valid proof-of-work
+* non-empty transaction list
+* valid difficulty value
+
+Invalid blocks are discarded and not relayed.
+
+---
+
+## Chain Selection
+
+If multiple valid chains are observed, the node selects the chain with the most accumulated proof-of-work.
+
+Shorter or invalid chains are ignored.
+
+---
+
+## Ongoing Synchronization
+
+After initial synchronization:
+
+* newly mined blocks are broadcast to peers
+* received blocks are immediately validated and relayed
+* all peers converge on the same chain over time
+
+Synchronization continues for the lifetime of the node.
+
+---
+
+## Peer Connections
+
+Nodes communicate directly using TCP.
+
+Default peer-to-peer port:
+
+```
+8333
 ```
 
-Cloning the repo does **not** give trust.
-Trust comes only from validating Proof-of-Work.
+The peer-to-peer port does not use HTTP.
 
 ---
 
-## 2️⃣ Build the node
+## Multiple Nodes (Local Testing)
 
-```bash
-cargo build --release
+Multiple nodes may be run on the same machine using different ports.
+
+Example:
+
+```
+Node A: 0.0.0.0:8333
+Node B: 0.0.0.0:8334
+Node C: 0.0.0.0:8335
 ```
 
-The binary will be created automatically.
+Nodes may be manually connected or connected using predefined seed addresses.
 
 ---
 
-## 3️⃣ Start the node
+## Persistence
 
-```bash
-cargo run --release
-```
+Synchronized blocks are written to disk.
 
-On first run, the node will:
-
-* Create the `data/` directory
-* Load existing blocks if present
-* Create the genesis block if needed
-
-You will see:
-
-```text
-⛓ Bitcoin v0.2 — Revelation Edition
-🌐 P2P listening on 0.0.0.0:8333
-🔄 Requesting sync from peers
-```
+A node that is shut down and restarted will resume synchronization from its last known height.
 
 ---
 
-## 4️⃣ Peer connection (automatic)
+## Failure Handling
 
-If peers are reachable, the node will:
+Temporary disconnections do not affect consensus.
 
-* Open TCP connections
-* Exchange messages
-* Remain connected in the background
-
-Peers may be:
-
-* Public internet nodes
-* LAN nodes
-* VPS nodes
-* Home nodes
-
-There is no central server.
+A node that falls behind will automatically resynchronize when connectivity is restored.
 
 ---
 
-## 5️⃣ Automatic sync begins
+## Summary
 
-After connecting, the node sends:
+Synchronization is decentralized, continuous, and automatic.
 
-```text
-SyncRequest { from_height: <local height> }
-```
+No trusted servers or coordinators are required.
 
-Peers respond by sending **real blocks**, not headers or hashes.
-
-For each received block:
-
-* Proof-of-Work is verified
-* Previous hash is checked
-* Merkle root is verified
-* The block is added to the chain
-* UTXO set is rebuilt
-
-You will see output like:
-
-```text
-📥 Sync progress | height 152
-📥 Sync progress | height 153
-```
-
----
-
-## 6️⃣ Sync completion
-
-Once blocks stop arriving and the height stabilizes:
-
-```text
-✅ Sync complete at height XXX
-```
-
-The node automatically switches to **normal mode**.
-
-No restart required.
-
----
-
-## 7️⃣ Normal operation (after sync)
-
-After syncing, the node will:
-
-* Mine new blocks
-* Broadcast mined blocks to peers
-* Accept blocks mined by others
-* Stay in consensus via PoW
-
-Example output:
-
-```text
-📊 Blockchain Status:
-Height: 1204
-Difficulty: 2
-UTXO Set Size: 1204
-Connected Peers: 5
-```
-
----
-
-## 8️⃣ Restarting a node (fast sync)
-
-If you stop and restart the node:
-
-* Blocks are loaded from `data/blocks.json`
-* UTXOs are loaded from `data/utxos.json`
-* Sync resumes only if new blocks exist
-
-This makes restarts fast.
-
----
-
-## 🔐 Important rules (do not break)
-
-* Do not edit `blocks.json`
-* Do not skip block validation
-* Do not trust GitHub commits for consensus
-* Do not assume longest chain = best chain
-* Proof-of-Work always wins
-
----
-
-## 🧩 Current limitations (v0.2)
-
-This version intentionally keeps things simple:
-
-* No headers-first sync yet
-* No fork reorganization yet
-* No DoS protection yet
-
-These are planned for future versions.
-
----
-
-## 🧠 Mental model to remember
-
-> GitHub distributes code
-> Proof-of-Work decides consensus
-> Peers exchange blocks
-> Every node verifies everything
-
-That is decentralization.
-
----
-
-End of document.
+Each node independently verifies all data it receives.
