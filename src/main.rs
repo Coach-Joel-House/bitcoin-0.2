@@ -2,7 +2,6 @@ use bitcoin_v0_2_revelation::chain::Blockchain;
 use bitcoin_v0_2_revelation::network::P2PNetwork;
 use bitcoin_v0_2_revelation::api::start_api;
 
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::sleep;
@@ -36,20 +35,20 @@ fn main() {
 
     let chain = Arc::new(Mutex::new(local_chain));
 
-    // ---- START HTTP API (FIXED & CORRECT) ----
+    // ---- HTTP API ----
     let api_chain = Arc::clone(&chain);
     thread::spawn(move || {
         let rt = Runtime::new().expect("Failed to create Tokio runtime");
         rt.block_on(start_api(api_chain, 8080));
     });
-    // -----------------------------------------
+    // ------------------
 
     let miner_key = "REVELATION_MINER_001";
 
-    let listen_addr = "0.0.0.0:8333".parse::<SocketAddr>().unwrap();
-    let p2p = P2PNetwork::new(listen_addr, Arc::clone(&chain));
-
-    println!("🌐 P2P listening on {}", listen_addr);
+    // ---- P2P NETWORK ----
+    let p2p = P2PNetwork::new(Arc::clone(&chain));
+    println!("🌐 P2P active at {}", p2p.local_addr());
+    // ---------------------
 
     let mut mode = NodeMode::Syncing;
     let mut last_height = chain.lock().unwrap().height();

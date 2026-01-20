@@ -28,34 +28,30 @@ pub struct PeerNode {
 
 pub struct P2PNetwork {
     peers: Arc<Mutex<HashMap<String, PeerNode>>>,
-    listen_addr: SocketAddr,
+    listener_addr: SocketAddr,
     chain: Arc<Mutex<Blockchain>>,
 }
 
 impl P2PNetwork {
-    pub fn new(listen_addr: SocketAddr, chain: Arc<Mutex<Blockchain>>) -> Self {
-        let network = Self {
-            peers: Arc::new(Mutex::new(HashMap::new())),
-            listen_addr,
-            chain,
-        };
-        network.start_listening();
-        network
-    }
+    pub fn new(chain: Arc<Mutex<Blockchain>>) -> Self {
+        let listener = TcpListener::bind("0.0.0.0:0")
+            .expect("Failed to bind P2P listener");
 
-    fn start_listening(&self) {
-        let listener = TcpListener::bind(self.listen_addr).unwrap();
         listener.set_nonblocking(true).unwrap();
+        let listener_addr = listener.local_addr().unwrap();
 
-        let peers = Arc::clone(&self.peers);
-        let chain = Arc::clone(&self.chain);
+        println!("🔗 P2P listening on {}", listener_addr);
+
+        let peers = Arc::new(Mutex::new(HashMap::new()));
+        let peers_clone = Arc::clone(&peers);
+        let chain_clone = Arc::clone(&chain);
 
         thread::spawn(move || loop {
             match listener.accept() {
                 Ok((stream, addr)) => {
                     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
 
-                    peers.lock().unwrap().insert(
+                    peers_clone.lock().unwrap().insert(
                         addr.to_string(),
                         PeerNode {
                             address: addr,
@@ -64,11 +60,11 @@ impl P2PNetwork {
                         },
                     );
 
-                    let peers_clone = Arc::clone(&peers);
-                    let chain_clone = Arc::clone(&chain);
+                    let peers_inner = Arc::clone(&peers_clone);
+                    let chain_inner = Arc::clone(&chain_clone);
 
                     thread::spawn(move || {
-                        Self::handle_peer(stream, peers_clone, chain_clone);
+                        Self::handle_peer(stream, peers_inner, chain_inner);
                     });
                 }
                 Err(_) => {
@@ -76,6 +72,16 @@ impl P2PNetwork {
                 }
             }
         });
+
+        Self {
+            peers,
+            listener_addr,
+            chain,
+        }
+    }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.listener_addr
     }
 
     fn handle_peer(
@@ -85,6 +91,7 @@ impl P2PNetwork {
     ) {
         loop {
             let mut buffer = vec![0u8; 4 * 1024 * 1024];
+
             match stream.read(&mut buffer) {
                 Ok(n) if n > 0 => {
                     let msg: P2PMessage = match bincode::deserialize(&buffer[..n]) {

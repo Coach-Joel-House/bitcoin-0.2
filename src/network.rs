@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use crate::block::Block;
@@ -11,8 +10,8 @@ pub struct P2PNetwork {
 }
 
 impl P2PNetwork {
-    pub fn new(listen_addr: SocketAddr, chain: Arc<Mutex<Blockchain>>) -> Self {
-        let inner = PrivateP2PNetwork::new(listen_addr, chain);
+    pub fn new(chain: Arc<Mutex<Blockchain>>) -> Self {
+        let inner = PrivateP2PNetwork::new(chain);
         Self { inner }
     }
 
@@ -30,5 +29,9 @@ impl P2PNetwork {
 
     pub fn peer_count(&self) -> usize {
         self.inner.peer_count()
+    }
+
+    pub fn local_addr(&self) -> std::net::SocketAddr {
+        self.inner.local_addr()
     }
 }

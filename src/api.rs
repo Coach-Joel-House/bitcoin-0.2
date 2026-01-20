@@ -1,10 +1,13 @@
-use axum::{
-    routing::get,
-    Json, Router,
-};
+use tokio::net::TcpListener;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use std::net::SocketAddr;
+
+use axum::{
+    Router,
+    Json,
+    routing::get,
+};
 
 use crate::chain::Blockchain;
 
@@ -60,10 +63,9 @@ pub async fn start_api(
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     println!("🌐 API running at http://{}", addr);
 
-    axum::serve(
-        tokio::net::TcpListener::bind(addr).await.unwrap(),
-        app,
-    )
-    .await
-    .unwrap();
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    axum::serve(listener, app)
+        .await
+        .unwrap();
 }
