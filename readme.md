@@ -127,7 +127,7 @@ Returns a list of known blocks
 
 Example
 http://127.0.0.1:8080/status
-http://127.0.0.1:8080/blocks
+http://127.0.0.1:8080/supply
 When running multiple nodes on one machine, only one node should bind to port 8080, or the API port should be changed.
 
 Data Storage
