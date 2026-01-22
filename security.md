@@ -84,13 +84,4 @@ The system prioritizes simplicity, auditability, and correctness over complexity
 
 No trust is required beyond the rules themselves.
 
----
-
-### Why this is better (briefly)
-
-* Reads like a **whitepaper / protocol doc**, not a README
-* Avoids marketing language
-* States limitations clearly (very Satoshi-like)
-* Uses **probabilistic finality language** correctly
-* Emphasizes *rules over trust*
 
