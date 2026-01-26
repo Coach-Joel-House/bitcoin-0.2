@@ -14,6 +14,8 @@ use axum::{
 
 use crate::chain::Blockchain;
 
+const COINBASE_MATURITY: u64 = 100;
+
 #[derive(Clone)]
 struct AppState {
     chain: Arc<Mutex<Blockchain>>,
@@ -28,10 +30,9 @@ pub async fn start_api(chain: Arc<Mutex<Blockchain>>, port: u16) {
         .route("/block/height/:height", get(block_by_height))
         .route("/tx/:txid", get(tx_by_id))
         .route("/address/:hash", get(address_info))
-        .route("/transactions/new", post(new_transaction)) // 🔥 NEW
+        .route("/transactions/new", post(new_transaction))
         .with_state(state);
 
-    // 🔥 IMPORTANT: allow connections from your phone / LAN
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
@@ -47,15 +48,33 @@ struct StatusResponse {
     blocks: usize,
     utxos: usize,
     mempool: usize,
+
+    total_mined: u64,
+    circulating_supply: u64,
 }
 
 async fn status(State(state): State<AppState>) -> Json<StatusResponse> {
     let c = state.chain.lock().unwrap();
+    let height = c.height();
+
+    let mut total_mined = 0u64;
+    let mut circulating = 0u64;
+
+    for u in c.utxos.values() {
+        total_mined += u.value;
+
+        if !u.is_coinbase || height >= u.height + COINBASE_MATURITY {
+            circulating += u.value;
+        }
+    }
+
     Json(StatusResponse {
-        height: c.height(),
+        height,
         blocks: c.blocks.len(),
         utxos: c.utxos.len(),
         mempool: c.mempool.len(),
+        total_mined,
+        circulating_supply: circulating,
     })
 }
 
@@ -72,11 +91,16 @@ struct BlockResponse {
 
 async fn blocks(State(state): State<AppState>) -> Json<Vec<BlockResponse>> {
     let c = state.chain.lock().unwrap();
-    Json(c.blocks.iter().map(|b| BlockResponse {
-        height: b.header.height,
-        hash: hex(&b.hash),
-        txs: b.transactions.len(),
-    }).collect())
+    Json(
+        c.blocks
+            .iter()
+            .map(|b| BlockResponse {
+                height: b.header.height,
+                hash: hex(&b.hash),
+                txs: b.transactions.len(),
+            })
+            .collect(),
+    )
 }
 
 async fn block_by_height(
@@ -89,7 +113,8 @@ async fn block_by_height(
             height,
             hash: hex(&b.hash),
             txs: b.transactions.len(),
-        }).into_response(),
+        })
+        .into_response(),
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
@@ -117,7 +142,8 @@ async fn tx_by_id(
                     txid,
                     inputs: tx.inputs.len(),
                     outputs: tx.outputs.len(),
-                }).into_response();
+                })
+                .into_response();
             }
         }
     }
@@ -130,8 +156,8 @@ async fn tx_by_id(
 
 #[derive(Deserialize)]
 struct NewTxRequest {
-    from: String, // hex pubkey_hash
-    to: String,   // hex pubkey_hash
+    from: String,
+    to: String,
     amount: u64,
 }
 
@@ -158,12 +184,14 @@ async fn new_transaction(
             (
                 StatusCode::OK,
                 format!("Transaction added to mempool: {}", txid),
-            ).into_response()
+            )
+                .into_response()
         }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             format!("Transaction failed: {}", e),
-        ).into_response(),
+        )
+            .into_response(),
     }
 }
 
@@ -173,7 +201,9 @@ async fn new_transaction(
 
 #[derive(Serialize)]
 struct AddressResponse {
-    balance: u64,
+    total: u64,
+    spendable: u64,
+    locked: u64,
     utxos: usize,
 }
 
@@ -182,17 +212,36 @@ async fn address_info(
     Path(hash): Path<String>,
 ) -> Json<AddressResponse> {
     let c = state.chain.lock().unwrap();
-    let mut balance = 0;
-    let mut count = 0;
+    let height = c.height();
+
+    let mut total = 0u64;
+    let mut spendable = 0u64;
+    let mut locked = 0u64;
+    let mut count = 0usize;
 
     for u in c.utxos.values() {
-        if hex(&u.pubkey_hash) == hash {
-            balance += u.value;
-            count += 1;
+        if hex(&u.pubkey_hash) != hash {
+            continue;
+        }
+
+        total += u.value;
+        count += 1;
+
+        if !u.is_coinbase {
+            spendable += u.value;
+        } else if height >= u.height + COINBASE_MATURITY {
+            spendable += u.value;
+        } else {
+            locked += u.value;
         }
     }
 
-    Json(AddressResponse { balance, utxos: count })
+    Json(AddressResponse {
+        total,
+        spendable,
+        locked,
+        utxos: count,
+    })
 }
 
 //

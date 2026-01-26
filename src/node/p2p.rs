@@ -5,32 +5,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
-use serde::{Serialize, Deserialize};
+use crate::core::block::Block;
+use crate::core::transaction::Transaction;
+use crate::core::chain::Blockchain;
+use crate::validation::validate_transaction;
+use crate::node::message::{NetworkMessage, PROTOCOL_VERSION};
 
-use crate::block::Block;
-use crate::transaction::Transaction;
-use crate::chain::Blockchain;
+const MAX_MESSAGE_SIZE: usize = 1 * 1024 * 1024;
+const MAX_ADDRS: usize = 32;
 
-// ─────────────────────────────────────────────────────────────
-// P2P HARDENING CONSTANTS (NON-CONSENSUS)
-// ─────────────────────────────────────────────────────────────
-#[allow(dead_code)] // reserved for future peer eviction
-const MAX_MESSAGE_SIZE: usize = 1 * 1024 * 1024; // 1 MB
-
-#[allow(dead_code)] // reserved for future peer eviction
-const PEER_TIMEOUT_SECS: i64 = 60;
-// ─────────────────────────────────────────────────────────────
-
-#[derive(Clone, Serialize, Deserialize)]
-pub enum P2PMessage {
-    SyncRequest { from_height: u64 },
-    Block(Block),
-    Transaction(Transaction),
-    Ping,
-    Pong,
-}
-
-#[allow(dead_code)] // reserved for future peer scoring / banning
 pub struct PeerNode {
     pub address: SocketAddr,
     pub last_seen: i64,
@@ -46,53 +29,111 @@ pub struct P2PNetwork {
 impl P2PNetwork {
     pub fn new(chain: Arc<Mutex<Blockchain>>) -> Self {
         let listener = TcpListener::bind("0.0.0.0:0")
-            .expect("Failed to bind P2P listener");
-
+            .expect("P2P bind failed");
         listener.set_nonblocking(true).unwrap();
-        let listener_addr = listener.local_addr().unwrap();
 
-        println!("🔗 P2P listening on {}", listener_addr);
-
+        let addr = listener.local_addr().unwrap();
         let peers = Arc::new(Mutex::new(HashMap::new()));
-        let peers_clone = Arc::clone(&peers);
-        let chain_clone = Arc::clone(&chain);
 
+        let peers_accept = Arc::clone(&peers);
+        let chain_accept = Arc::clone(&chain);
+
+        // ───────── inbound peers ─────────
         thread::spawn(move || loop {
             match listener.accept() {
-                Ok((stream, addr)) => {
-                    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+                Ok((stream, peer_addr)) => {
+                    if peer_addr.ip().is_loopback() {
+                        continue;
+                    }
 
-                    peers_clone.lock().unwrap().insert(
-                        addr.to_string(),
+                    println!("🌐 Incoming peer {}", peer_addr);
+
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(30)))
+                        .ok();
+
+                    peers_accept.lock().unwrap().insert(
+                        peer_addr.to_string(),
                         PeerNode {
-                            address: addr,
+                            address: peer_addr,
                             last_seen: now(),
                             stream: stream.try_clone().unwrap(),
                         },
                     );
 
-                    let peers_inner = Arc::clone(&peers_clone);
-                    let chain_inner = Arc::clone(&chain_clone);
+                    let peers_inner = Arc::clone(&peers_accept);
+                    let chain_inner = Arc::clone(&chain_accept);
 
                     thread::spawn(move || {
                         Self::handle_peer(stream, peers_inner, chain_inner);
                     });
                 }
-                Err(_) => {
-                    thread::sleep(Duration::from_millis(100));
-                }
+                Err(_) => thread::sleep(Duration::from_millis(100)),
             }
         });
 
         Self {
             peers,
-            listener_addr,
+            listener_addr: addr,
             chain,
         }
     }
 
-    pub fn local_addr(&self) -> SocketAddr {
-        self.listener_addr
+    /// ───────── outbound connect ─────────
+    pub fn connect(&self, addr: SocketAddr) {
+        if addr.ip().is_loopback() {
+            return;
+        }
+
+        if self.peers.lock().unwrap().contains_key(&addr.to_string()) {
+            return;
+        }
+
+        match TcpStream::connect(addr) {
+            Ok(mut stream) => {
+                println!("🌍 Outbound peer connected: {}", addr);
+
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .ok();
+
+                self.peers.lock().unwrap().insert(
+                    addr.to_string(),
+                    PeerNode {
+                        address: addr,
+                        last_seen: now(),
+                        stream: stream.try_clone().unwrap(),
+                    },
+                );
+
+                // ── HELLO ──
+                let height = self.chain.lock().unwrap().height();
+                let hello = NetworkMessage::Hello {
+                    version: PROTOCOL_VERSION,
+                    height,
+                    agent: "bitcoin-v0.3.2-revelation".to_string(),
+                };
+
+                let _ = stream.write_all(
+                    &bincode::serialize(&hello).unwrap()
+                );
+
+                // ── GETADDR ──
+                let _ = stream.write_all(
+                    &bincode::serialize(&NetworkMessage::GetAddr).unwrap()
+                );
+
+                let peers = Arc::clone(&self.peers);
+                let chain = Arc::clone(&self.chain);
+
+                thread::spawn(move || {
+                    Self::handle_peer(stream, peers, chain);
+                });
+            }
+            Err(e) => {
+                println!("❌ Failed to connect {}: {}", addr, e);
+            }
+        }
     }
 
     fn handle_peer(
@@ -101,93 +142,132 @@ impl P2PNetwork {
         chain: Arc<Mutex<Blockchain>>,
     ) {
         loop {
-            let mut buffer = vec![0u8; MAX_MESSAGE_SIZE];
-
-            let n = match stream.read(&mut buffer) {
-                Ok(0) => break,
+            let mut buf = vec![0u8; MAX_MESSAGE_SIZE];
+            let n = match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
                 Ok(n) => n,
-                Err(_) => break,
             };
 
-            // 🔒 Reject oversized payloads
-            if n >= MAX_MESSAGE_SIZE {
-                break;
-            }
-
-            let msg: P2PMessage = match bincode::deserialize(&buffer[..n]) {
+            let msg: NetworkMessage = match bincode::deserialize(&buf[..n]) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
 
-            // 🔒 Update peer liveness
-            if let Ok(addr) = stream.peer_addr() {
-                if let Some(peer) = peers.lock().unwrap().get_mut(&addr.to_string()) {
-                    peer.last_seen = now();
-                }
-            }
-
             match msg {
-                P2PMessage::SyncRequest { from_height } => {
-                    let chain = chain.lock().unwrap();
+                NetworkMessage::Hello { version, height, agent } => {
+                    if version != PROTOCOL_VERSION {
+                        println!("❌ Protocol mismatch from {}", stream.peer_addr().unwrap());
+                        break;
+                    }
 
-                    for block in chain.blocks.iter().skip(from_height as usize) {
-                        let data = match bincode::serialize(
-                            &P2PMessage::Block(block.clone())
-                        ) {
-                            Ok(d) => d,
-                            Err(_) => continue,
+                    println!(
+                        "🤝 Handshake OK with {} [{}] height={}",
+                        stream.peer_addr().unwrap(),
+                        agent,
+                        height
+                    );
+
+                    let local_height = chain.lock().unwrap().height();
+                    if height > local_height {
+                        let req = NetworkMessage::SyncRequest {
+                            from_height: local_height,
                         };
-
-                        if data.len() > MAX_MESSAGE_SIZE {
-                            break;
-                        }
-
-                        let _ = stream.write_all(&data);
+                        let _ = stream.write_all(
+                            &bincode::serialize(&req).unwrap()
+                        );
                     }
                 }
 
-                P2PMessage::Block(block) => {
-                    let mut chain = chain.lock().unwrap();
-                    chain.validate_and_add_block(block);
+                NetworkMessage::GetAddr => {
+                    let list: Vec<String> = peers
+                        .lock()
+                        .unwrap()
+                        .keys()
+                        .take(MAX_ADDRS)
+                        .cloned()
+                        .collect();
+
+                    let _ = stream.write_all(
+                        &bincode::serialize(
+                            &NetworkMessage::Addr(list)
+                        ).unwrap()
+                    );
                 }
 
-                P2PMessage::Transaction(_) => {
-                    // v0.2: tx gossip intentionally disabled
+                NetworkMessage::Addr(addrs) => {
+                    for addr_str in addrs {
+                        if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+                            if !addr.ip().is_loopback() {
+                                let _ = TcpStream::connect(addr);
+                            }
+                        }
+                    }
                 }
 
-                P2PMessage::Ping => {
-                    let data = bincode::serialize(&P2PMessage::Pong).unwrap();
-                    let _ = stream.write_all(&data);
+                NetworkMessage::SyncRequest { from_height } => {
+                    let c = chain.lock().unwrap();
+                    for b in c.blocks.iter().skip(from_height as usize) {
+                        let _ = stream.write_all(
+                            &bincode::serialize(
+                                &NetworkMessage::Block(b.clone())
+                            ).unwrap()
+                        );
+                    }
                 }
 
-                P2PMessage::Pong => {}
+                NetworkMessage::Block(block) => {
+                    chain.lock().unwrap()
+                        .validate_and_add_block(block);
+                }
+
+                NetworkMessage::Transaction(tx) => {
+                    let c = chain.lock().unwrap();
+                    let _ = validate_transaction(&tx, &c.utxos, c.height());
+                }
+
+                NetworkMessage::Ping => {
+                    let _ = stream.write_all(
+                        &bincode::serialize(&NetworkMessage::Pong).unwrap()
+                    );
+                }
+
+                NetworkMessage::Pong => {}
             }
         }
 
-        // 🔒 Cleanup disconnected peer
         if let Ok(addr) = stream.peer_addr() {
+            println!("🔌 Disconnected {}", addr);
             peers.lock().unwrap().remove(&addr.to_string());
         }
     }
 
     pub fn request_sync(&self) {
         let height = self.chain.lock().unwrap().height();
-        let msg = P2PMessage::SyncRequest { from_height: height };
+        let msg = NetworkMessage::SyncRequest { from_height: height };
         let data = bincode::serialize(&msg).unwrap();
 
-        let mut peers = self.peers.lock().unwrap();
-        for peer in peers.values_mut() {
-            let _ = peer.stream.write_all(&data);
+        for p in self.peers.lock().unwrap().values_mut() {
+            let _ = p.stream.write_all(&data);
         }
     }
 
     pub fn broadcast_block(&self, block: &Block) {
-        let msg = P2PMessage::Block(block.clone());
-        let data = bincode::serialize(&msg).unwrap();
+        let data = bincode::serialize(
+            &NetworkMessage::Block(block.clone())
+        ).unwrap();
 
-        let mut peers = self.peers.lock().unwrap();
-        for peer in peers.values_mut() {
-            let _ = peer.stream.write_all(&data);
+        for p in self.peers.lock().unwrap().values_mut() {
+            let _ = p.stream.write_all(&data);
+        }
+    }
+
+    pub fn broadcast_transaction(&self, tx: &Transaction) {
+        let data = bincode::serialize(
+            &NetworkMessage::Transaction(tx.clone())
+        ).unwrap();
+
+        for p in self.peers.lock().unwrap().values_mut() {
+            let _ = p.stream.write_all(&data);
         }
     }
 
@@ -195,14 +275,8 @@ impl P2PNetwork {
         self.peers.lock().unwrap().len()
     }
 
-    #[allow(dead_code)] // reserved for future scheduled maintenance
-    pub fn evict_idle_peers(&self) {
-        let now = now();
-        let mut peers = self.peers.lock().unwrap();
-
-        peers.retain(|_, peer| {
-            now - peer.last_seen <= PEER_TIMEOUT_SECS
-        });
+    pub fn local_addr(&self) -> SocketAddr {
+        self.listener_addr
     }
 }
 

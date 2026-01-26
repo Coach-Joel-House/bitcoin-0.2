@@ -4,10 +4,12 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 use std::io::{self, Write};
 use std::env;
+use std::net::SocketAddr;
 
 use tokio::runtime::Runtime;
+use rpassword::read_password;
 
-// Import from the LIB crate (not crate::)
+// Import from the LIB crate
 use bitcoin_v0_2_revelation::core::chain::Blockchain;
 use bitcoin_v0_2_revelation::node::network::P2PNetwork;
 use bitcoin_v0_2_revelation::interface::{api::start_api, cli};
@@ -22,16 +24,22 @@ enum NodeMode {
     Normal,
 }
 
-fn prompt(msg: &str) -> String {
+fn prompt_secret(msg: &str) -> String {
     print!("{}", msg);
     io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input.trim().to_string()
+    read_password().unwrap()
+}
+
+/// Parse: --connect IP:PORT
+fn parse_connect_arg(args: &[String]) -> Option<SocketAddr> {
+    args.iter()
+        .position(|a| a == "--connect")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|s| s.parse().ok())
 }
 
 fn main() {
-    println!("⛓ Bitcoin v0.3.0 — Revelation Edition (Consensus v3)");
+    println!("⛓ Bitcoin v0.3.2 — Revelation Edition (Consensus v3)");
 
     let wallet_store = load_wallet_store();
     let miner_config = load_miner_config();
@@ -40,8 +48,9 @@ fn main() {
         panic!("Configured wallet '{}' not found", miner_config.coinbase_wallet);
     }
 
-    let _passphrase = prompt("🔐 Enter wallet passphrase: ");
-    let password   = prompt("🔑 Enter wallet password: ");
+    // 🔐 SAFE INPUT (NO ECHO)
+    let _passphrase = prompt_secret("🔐 Enter wallet passphrase: ");
+    let password = prompt_secret("🔑 Enter wallet password: ");
 
     let mut wallet = Wallet::load_or_create(&password);
     let miner_pubkey_hash = wallet.address().expect("wallet locked");
@@ -59,7 +68,7 @@ fn main() {
     let chain = Arc::new(Mutex::new(local_chain));
     let mempool = Arc::new(Mutex::new(Mempool::new()));
 
-    // ───────── CLI MODE (early exit) ─────────
+    // ───────── CLI MODE ─────────
     let args: Vec<String> = env::args().collect();
     if args.len() > 1 && args[1] == "wallet" {
         cli::handle_command(
@@ -74,7 +83,7 @@ fn main() {
     // ───────── API Server ─────────
     let api_chain = Arc::clone(&chain);
     thread::spawn(move || {
-        let rt = Runtime::new().expect("Failed to create Tokio runtime");
+        let rt = Runtime::new().expect("Tokio runtime failed");
         rt.block_on(start_api(api_chain, 8080));
     });
 
@@ -82,15 +91,20 @@ fn main() {
 
     // ───────── P2P ─────────
     let p2p = P2PNetwork::new(Arc::clone(&chain));
-    println!("🌐 P2P listening on {}", p2p.local_addr());
+    println!("🔗 P2P listening on {}", p2p.local_addr());
+
+    if let Some(addr) = parse_connect_arg(&args) {
+        println!("🌍 Connecting to peer {}", addr);
+        p2p.connect(addr);
+    }
+
+    println!("🔄 Requesting sync from peers");
+    p2p.request_sync();
 
     let mut mode = NodeMode::Syncing;
     let mut last_height = chain.lock().unwrap().height();
     let mut last_change = Instant::now();
     let mut last_balance: u64 = 0;
-
-    println!("🔄 Requesting sync from peers");
-    p2p.request_sync();
 
     loop {
         match mode {
@@ -111,40 +125,37 @@ fn main() {
             }
 
             NodeMode::Normal => {
-                let mempool_txs = mempool.lock().unwrap().sorted_for_mining();
+                let txs = mempool.lock().unwrap().sorted_for_mining();
 
                 let candidate_block = {
-                    let chain_guard = chain.lock().unwrap();
-                    let prev_block = chain_guard.blocks.last().unwrap();
-
+                    let c = chain.lock().unwrap();
+                    let prev = c.blocks.last().unwrap();
                     miner::mine_block(
-                        prev_block,
-                        &chain_guard.utxos,
-                        mempool_txs,
+                        prev,
+                        &c.utxos,
+                        txs,
                         miner_pubkey_hash.clone(),
-                        &chain_guard.blocks,
+                        &c.blocks,
                     )
                 };
 
                 let accepted = {
-                    let mut chain_guard = chain.lock().unwrap();
-                    chain_guard.validate_and_add_block(candidate_block.clone())
+                    let mut c = chain.lock().unwrap();
+                    c.validate_and_add_block(candidate_block.clone())
                 };
 
                 if accepted {
                     p2p.broadcast_block(&candidate_block);
-
                     mempool.lock().unwrap()
                         .remove_confirmed(&candidate_block.transactions);
 
-                    let chain_guard = chain.lock().unwrap();
-                    let balance = chain_guard.utxos.values()
+                    let c = chain.lock().unwrap();
+                    let balance: u64 = c.utxos.values()
                         .filter(|u| u.pubkey_hash == miner_pubkey_hash)
                         .map(|u| u.value)
-                        .sum::<u64>();
+                        .sum();
 
-                    let height = chain_guard.height();
-
+                    let height = c.height();
                     if balance != last_balance {
                         println!("💰 Wallet balance: {} (height {})", balance, height);
                         last_balance = balance;

@@ -1,5 +1,5 @@
 use crate::crypto::sha256;
-use crate::transaction::Transaction;
+use super::transaction::Transaction;
 
 pub fn merkle_root(txs: &[Transaction]) -> Vec<u8> {
     if txs.is_empty() {

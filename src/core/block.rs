@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 use super::transaction::Transaction;
 use crate::crypto::sha256;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BlockHeader {
     pub height: u64,
     pub timestamp: i64,
@@ -12,7 +12,7 @@ pub struct BlockHeader {
     pub merkle_root: Vec<u8>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Block {
     pub header: BlockHeader,
     pub transactions: Vec<Transaction>,

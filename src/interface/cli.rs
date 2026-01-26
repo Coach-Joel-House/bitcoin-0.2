@@ -5,6 +5,8 @@ use crate::node::mempool::Mempool;
 use crate::wallet::Wallet;
 use crate::core::validation::validate_transaction;
 
+const COINBASE_MATURITY: u64 = 100;
+
 /// CLI wallet & transaction commands
 pub fn handle_command(
     args: Vec<String>,
@@ -20,18 +22,38 @@ pub fn handle_command(
     }
 
     match args[2].as_str() {
+        // ───────────────── BALANCE ─────────────────
         "balance" => {
             let chain_guard = chain.lock().unwrap();
             let my_hash = wallet.address().expect("wallet locked");
+            let current_height = chain_guard.height();
 
-            let balance: u64 = chain_guard.utxos.values()
-                .filter(|u| u.pubkey_hash == my_hash)
-                .map(|u| u.value)
-                .sum();
+            let mut total = 0u64;
+            let mut spendable = 0u64;
+            let mut locked = 0u64;
 
-            println!("💰 Balance: {}", balance);
+            for u in chain_guard.utxos.values() {
+                if u.pubkey_hash != my_hash {
+                    continue;
+                }
+
+                total += u.value;
+
+                if !u.is_coinbase {
+                    spendable += u.value;
+                } else if current_height >= u.height + COINBASE_MATURITY {
+                    spendable += u.value;
+                } else {
+                    locked += u.value;
+                }
+            }
+
+            println!("💰 Total balance:     {}", total);
+            println!("💸 Spendable balance: {}", spendable);
+            println!("🔒 Locked balance:    {}", locked);
         }
 
+        // ───────────────── SEND ─────────────────
         "send" => {
             if args.len() != 5 {
                 println!("Usage: wallet send <to_pubkey_hash_hex> <amount>");

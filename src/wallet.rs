@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use rand::{rngs::OsRng, RngCore};
 use zeroize::Zeroize;
@@ -14,9 +14,6 @@ use aes_gcm::aead::generic_array::GenericArray;
 
 use sha2::{Sha256, Digest};
 use pbkdf2::pbkdf2_hmac;
-
-#[allow(unused_imports)]
-use secp256k1::{SecretKey, PublicKey};
 
 use bip39::{Mnemonic, Language};
 use hex;
@@ -32,9 +29,9 @@ use crate::core::transaction::{Transaction, TxInput, TxOutput};
 use crate::core::utxo::UTXOSet;
 
 const WALLET_FILE: &str = "data/wallet.dat";
-const AUTO_LOCK_SECS: u64 = 60;
+const COINBASE_MATURITY: u64 = 100;
 
-/* ───────── Encrypted Wallet File (DISK) ───────── */
+/* ───────── Encrypted Wallet File ───────── */
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct WalletFile {
@@ -45,7 +42,7 @@ struct WalletFile {
     next_index: u32,
 }
 
-/* ───────── Memory Lock Helper ───────── */
+/* ───────── Memory Lock ───────── */
 
 fn lock_memory(bytes: &mut [u8]) {
     unsafe {
@@ -53,7 +50,7 @@ fn lock_memory(bytes: &mut [u8]) {
     }
 }
 
-/* ───────── HD Derivation (Deterministic) ───────── */
+/* ───────── HD Derivation ───────── */
 
 fn derive_child_seed(master: &[u8; 32], index: u32) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -66,7 +63,7 @@ fn derive_child_seed(master: &[u8; 32], index: u32) -> [u8; 32] {
     out
 }
 
-/* ───────── Runtime Wallet (MEMORY ONLY) ───────── */
+/* ───────── Wallet Struct ───────── */
 
 pub struct Wallet {
     master_seed: Option<[u8; 32]>,
@@ -74,9 +71,45 @@ pub struct Wallet {
     next_index: u32,
 }
 
-impl Wallet {
-    /* ---------- Load or Create ---------- */
+/* ───────── Balance Struct (UI ONLY) ───────── */
 
+pub struct WalletBalance {
+    pub total: u64,
+    pub spendable: u64,
+    pub locked: u64,
+}
+
+pub fn calculate_wallet_balance(
+    utxos: &UTXOSet,
+    my_pubkey_hash: &[u8],
+    current_height: u64,
+) -> WalletBalance {
+    let mut total = 0;
+    let mut spendable = 0;
+    let mut locked = 0;
+
+    for u in utxos.values() {
+        if u.pubkey_hash != my_pubkey_hash {
+            continue;
+        }
+
+        total += u.value;
+
+        if !u.is_coinbase {
+            spendable += u.value;
+        } else if current_height >= u.height + COINBASE_MATURITY {
+            spendable += u.value;
+        } else {
+            locked += u.value;
+        }
+    }
+
+    WalletBalance { total, spendable, locked }
+}
+
+/* ───────── Wallet Impl ───────── */
+
+impl Wallet {
     pub fn load_or_create(password: &str) -> Self {
         fs::create_dir_all("data").unwrap();
 
@@ -93,8 +126,6 @@ impl Wallet {
         }
     }
 
-    /* ---------- Create New Wallet ---------- */
-
     fn create_new(password: &str) -> Self {
         let mut entropy = [0u8; 16];
         OsRng.fill_bytes(&mut entropy);
@@ -109,8 +140,6 @@ impl Wallet {
         Self::create_from_mnemonic(password, &mnemonic.to_string())
             .expect("wallet creation failed")
     }
-
-    /* ---------- Restore From Mnemonic ---------- */
 
     pub fn create_from_mnemonic(
         password: &str,
@@ -152,7 +181,6 @@ impl Wallet {
         };
 
         fs::write(WALLET_FILE, bincode::serialize(&wf).unwrap()).unwrap();
-
         lock_memory(&mut master_seed);
 
         Ok(Wallet {
@@ -161,8 +189,6 @@ impl Wallet {
             next_index: 0,
         })
     }
-
-    /* ---------- Unlock ---------- */
 
     pub fn unlock(&mut self, password: &str) -> Result<(), ()> {
         let data = fs::read(WALLET_FILE).map_err(|_| ())?;
@@ -194,28 +220,12 @@ impl Wallet {
         Ok(())
     }
 
-    /* ---------- Lock ---------- */
-
     pub fn lock(&mut self) {
         if let Some(mut s) = self.master_seed.take() {
             s.zeroize();
         }
         self.last_unlock = None;
     }
-
-    pub fn is_unlocked(&mut self) -> bool {
-        if let Some(t) = self.last_unlock {
-            if t.elapsed() > Duration::from_secs(AUTO_LOCK_SECS) {
-                self.lock();
-                return false;
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    /* ---------- Address #0 ---------- */
 
     pub fn address(&self) -> Result<Vec<u8>, &'static str> {
         let master = self.master_seed.ok_or("wallet locked")?;
@@ -225,37 +235,7 @@ impl Wallet {
         Ok(pubkey_hash(&pk))
     }
 
-    /* ---------- Generate New HD Address ---------- */
-
-    pub fn next_address(&mut self) -> Result<Vec<u8>, &'static str> {
-        let master = self.master_seed.ok_or("wallet locked")?;
-
-        let index = self.next_index;
-        let child = derive_child_seed(&master, index);
-
-        let sk = secret_key_from_seed(&child);
-        let pk = public_key(&sk);
-
-        self.next_index += 1;
-
-        Ok(pubkey_hash(&pk))
-    }
-
-    /* ---------- Sign With Address Index ---------- */
-
-    pub fn sign_with_index(
-        &self,
-        msg: &[u8],
-        index: u32,
-    ) -> Result<Vec<u8>, &'static str> {
-        let master = self.master_seed.ok_or("wallet locked")?;
-        let child = derive_child_seed(&master, index);
-        let sk = secret_key_from_seed(&child);
-        Ok(sign(msg, &sk))
-    }
-
-    /* ---------- CREATE TRANSACTION ---------- */
-
+    /// 🔥 THIS METHOD WAS MISSING BEFORE
     pub fn create_transaction(
         &mut self,
         utxos: &UTXOSet,
@@ -303,7 +283,7 @@ impl Wallet {
 
         let change = collected - amount;
         if change > 0 {
-            let change_addr = self.next_address()?;
+            let change_addr = self.address()?;
             outputs.push(TxOutput {
                 value: change,
                 pubkey_hash: change_addr,
@@ -318,10 +298,12 @@ impl Wallet {
         let sighash = tx.sighash();
 
         for (txid, vout, index, _) in selected {
-            let sig = self.sign_with_index(&sighash, index)?;
-            let child = derive_child_seed(&master_seed, index);
-            let sk = secret_key_from_seed(&child);
-            let pk = public_key(&sk);
+            let sig = sign(&sighash, &secret_key_from_seed(
+                &derive_child_seed(&master_seed, index),
+            ));
+            let pk = public_key(&secret_key_from_seed(
+                &derive_child_seed(&master_seed, index),
+            ));
 
             tx.inputs.push(TxInput {
                 txid,
