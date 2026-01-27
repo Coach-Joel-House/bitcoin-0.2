@@ -27,9 +27,21 @@ pub struct P2PNetwork {
 }
 
 impl P2PNetwork {
+    /// ───────── DEFAULT (RANDOM PORT) ─────────
     pub fn new(chain: Arc<Mutex<Blockchain>>) -> Self {
-        let listener = TcpListener::bind("0.0.0.0:0")
+        Self::bind_internal("0.0.0.0:0", chain)
+    }
+
+    /// ───────── SEED NODE (FIXED PORT) ─────────
+    pub fn bind(addr: &str, chain: Arc<Mutex<Blockchain>>) -> Self {
+        Self::bind_internal(addr, chain)
+    }
+
+    /// ───────── INTERNAL BIND ─────────
+    fn bind_internal(bind_addr: &str, chain: Arc<Mutex<Blockchain>>) -> Self {
+        let listener = TcpListener::bind(bind_addr)
             .expect("P2P bind failed");
+
         listener.set_nonblocking(true).unwrap();
 
         let addr = listener.local_addr().unwrap();
@@ -43,7 +55,7 @@ impl P2PNetwork {
             match listener.accept() {
                 Ok((stream, peer_addr)) => {
                     if peer_addr.ip().is_loopback() {
-                        continue;
+                        return;
                     }
 
                     println!("🌐 Incoming peer {}", peer_addr);
@@ -71,6 +83,8 @@ impl P2PNetwork {
                 Err(_) => thread::sleep(Duration::from_millis(100)),
             }
         });
+
+        println!("🔗 P2P listening on {}", addr);
 
         Self {
             peers,
@@ -111,7 +125,7 @@ impl P2PNetwork {
                 let hello = NetworkMessage::Hello {
                     version: PROTOCOL_VERSION,
                     height,
-                    agent: "bitcoin-v0.3.2-revelation".to_string(),
+                    agent: "bitcoin-v0.3.2-revelation-seed".to_string(),
                 };
 
                 let _ = stream.write_all(
@@ -188,9 +202,7 @@ impl P2PNetwork {
                         .collect();
 
                     let _ = stream.write_all(
-                        &bincode::serialize(
-                            &NetworkMessage::Addr(list)
-                        ).unwrap()
+                        &bincode::serialize(&NetworkMessage::Addr(list)).unwrap()
                     );
                 }
 
@@ -208,9 +220,7 @@ impl P2PNetwork {
                     let c = chain.lock().unwrap();
                     for b in c.blocks.iter().skip(from_height as usize) {
                         let _ = stream.write_all(
-                            &bincode::serialize(
-                                &NetworkMessage::Block(b.clone())
-                            ).unwrap()
+                            &bincode::serialize(&NetworkMessage::Block(b.clone())).unwrap()
                         );
                     }
                 }
