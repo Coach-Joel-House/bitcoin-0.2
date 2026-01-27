@@ -1,7 +1,6 @@
-
 # ⛓ Bitcoin v0.3.2 — Revelation Edition
 
-### Stable Node, Wallet & Transaction Layer
+**Stable Node, Wallet, Mining & Public P2P Network**
 
 **Consensus v3 — Frozen**
 
@@ -12,37 +11,67 @@
 
 ## Overview
 
-**Bitcoin Revelation v0.3.2** is a stable, non-forking release that activates the full **wallet, transaction, mempool, mining, API, and P2P networking layers** on top of a **frozen Layer-1 Consensus v3**.
+**Bitcoin Revelation v0.3.2** is a stable, non-forking release that activates the **full wallet, transaction, mempool, mining, API, and P2P networking layers** on top of a **frozen Layer-1 Consensus v3**.
 
-* ✅ No consensus rules are modified
-* ✅ No chain reset is required
-* ✅ Safe for long-running nodes
+This release now includes a **live public seed node**, allowing anyone to join and mine without manual peer coordination.
+
+✅ No consensus rules modified
+✅ No chain reset required
+✅ Safe for long-running nodes
+✅ Public P2P network online
+
+---
+
+## 🌍 Public Seed Node (Live)
+
+A public seed node is running and reachable:
+
+```
+bitcoin-0-2.fly.dev:8333
+```
+
+This node:
+
+* Accepts inbound P2P connections
+* Shares peer addresses (`getaddr`)
+* Does **not** mine
+* Does **not** alter consensus
+* Exists purely for decentralized bootstrapping
+
+Once connected, nodes discover peers automatically and the network becomes self-sustaining.
 
 ---
 
 ## Release Status
 
-Version **0.3.2** is a stabilization and integration release following **v0.3.1**.
+**v0.3.2** is a stabilization and integration release following **v0.3.1**.
 
-### What’s Included
+This is the **first public-network-ready release** of Bitcoin Revelation.
+
+---
+
+## What’s Included
 
 * Deterministic HD wallets (BIP39)
-* Encrypted wallet storage (AES-GCM + PBKDF2)
+* Encrypted wallet storage (AES-256-GCM + PBKDF2)
 * ECDSA transaction signing & validation
 * Coinbase maturity enforcement
 * Mempool validation & transaction relay
-* Miner selection from mempool
+* Miner transaction selection from mempool
 * Full P2P block & transaction propagation
+* Public seed node support
 * REST API block explorer
 * Command-line wallet interface
-* Persistent chain & UTXO storage
+* Persistent blockchain & UTXO storage
 
-### What’s NOT Changed
+---
 
-* ❌ No consensus rule changes
-* ❌ No reward schedule changes
-* ❌ No difficulty changes
-* ❌ No protocol fork
+## What’s NOT Changed
+
+❌ No consensus rule changes
+❌ No reward schedule changes
+❌ No difficulty changes
+❌ No protocol fork
 
 ➡ **Consensus v3 remains frozen**
 
@@ -50,7 +79,7 @@ Version **0.3.2** is a stabilization and integration release following **v0.3.1*
 
 ## Transaction Layer
 
-The transaction system is fully operational and enforced by nodes.
+The transaction system is fully operational and enforced by all nodes.
 
 ### UTXO Ownership Model
 
@@ -88,7 +117,7 @@ The wallet operates **above consensus** and does not alter validation rules.
 4. Transaction enters the mempool
 5. Mempool applies policy rules
 6. Miner selects transactions
-7. Block is mined under **Consensus v3**
+7. Block is mined under Consensus v3
 8. UTXO set updates deterministically
 
 ---
@@ -119,27 +148,42 @@ Wallet commands interact with the **local node and mempool**.
 
 ## REST API (Explorer)
 
-**Default endpoint:**
+Default endpoint:
 
 ```
 http://127.0.0.1:8080
 ```
 
-**Available endpoints:**
+Available endpoints:
+
+* `/status`
+* `/blocks`
+* `/block/height/{n}`
+* `/tx/{txid}`
+* `/address/{pubkey_hash}`
+
+---
+
+## ⛏️ Mining & Running a Full Node
+
+### ⚠️ Important: Use the Release Tags
+
+If you want to **mine**, **always download from tags**, not `main`.
+
+👉 **Releases:**
+[https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2/tags](https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2/tags)
+
+Recommended:
 
 ```
-/status
-/blocks
-/block/height/{n}
-/tx/{txid}
-/address/{pubkey_hash}
+v0.3.2
 ```
 
 ---
 
-# Installation & Running the Node
+## Installation & Running the Node
 
-## Requirements (All Platforms)
+### Requirements (All Platforms)
 
 * Internet connection
 * ~200 MB disk space
@@ -147,54 +191,49 @@ http://127.0.0.1:8080
 
 ---
 
-## 📱 Termux (Android)
+### 📱 Termux (Android)
 
-### 1️⃣ Install dependencies
+1️⃣ Install dependencies:
 
 ```bash
 pkg update && pkg upgrade
 pkg install git rust clang openssl pkg-config
 ```
 
-### 2️⃣ Clone repository
+2️⃣ Clone the repository:
 
 ```bash
 git clone https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2.git
 cd bitcoin-0.2
+git checkout v0.3.2
 ```
 
-### 3️⃣ Build & run
+3️⃣ Build & run:
 
 ```bash
 cargo run
 ```
 
-The node will:
-
-* Create a wallet
-* Start P2P networking
-* Start mining
-* Launch API on port `8080`
-
 ---
 
-## 💻 Linux / macOS
+### 💻 Linux / macOS
 
-### 1️⃣ Install Rust
+1️⃣ Install Rust:
 
 ```bash
 curl https://sh.rustup.rs -sSf | sh
 source ~/.cargo/env
 ```
 
-### 2️⃣ Clone repository
+2️⃣ Clone the repository:
 
 ```bash
 git clone https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2.git
 cd bitcoin-0.2
+git checkout v0.3.2
 ```
 
-### 3️⃣ Run node
+3️⃣ Run node:
 
 ```bash
 cargo run
@@ -202,23 +241,21 @@ cargo run
 
 ---
 
-## 🪟 Windows (PowerShell)
+### 🪟 Windows (PowerShell)
 
-### 1️⃣ Install Rust
-
-Download and install:
+1️⃣ Install Rust:
 👉 [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
+(Restart PowerShell after installation)
 
-Restart PowerShell after installation.
-
-### 2️⃣ Clone repository
+2️⃣ Clone repository:
 
 ```powershell
 git clone https://github.com/Satoshi-Nakamoto-ITL/bitcoin-0.2.git
 cd bitcoin-0.2
+git checkout v0.3.2
 ```
 
-### 3️⃣ Run node
+3️⃣ Run node:
 
 ```powershell
 cargo run
@@ -226,16 +263,30 @@ cargo run
 
 ---
 
-## 🔗 Connecting to a Peer
+## 🔗 Connecting to the Network
+
+### Automatic (Recommended)
+
+Nodes automatically connect to the public seed:
+
+```
+bitcoin-0-2.fly.dev:8333
+```
+
+No configuration required.
+
+---
+
+### Manual Peer Connection
 
 ```bash
 cargo run -- --connect IP:PORT
 ```
 
-**Example:**
+Example:
 
 ```bash
-cargo run -- --connect 203.0.113.5:8333
+cargo run -- --connect bitcoin-0-2.fly.dev:8333
 ```
 
 ---
@@ -265,7 +316,7 @@ data/
 
 ## Release Identifier
 
-* **Tag:** `v0.3.2`
+* **Tag:** v0.3.2
 * **Client:** Bitcoin Revelation v0.3.2
 * **Consensus:** v3 (frozen)
 
@@ -275,7 +326,7 @@ data/
 
 * **v0.3.0** → Base layer stabilization
 * **v0.3.1** → Wallet & transaction activation
-* **v0.3.2** → Stable integrated node release
+* **v0.3.2** → Public P2P network & stable integrated node
 
 ---
 
@@ -294,5 +345,6 @@ There is:
 ---
 
 **Satoshi-Nakamoto-ITL**
-*Bitcoin v0.3.2 — Revelation Edition*
+⛓ *Bitcoin v0.3.2 — Revelation Edition*
 
+---
