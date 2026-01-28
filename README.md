@@ -1,4 +1,5 @@
-⛓ Bitcoin v0.3.3 — Revelation Edition  
+**⛓ Bitcoin v0.3.3 — Revelation Edition  **
+
 Stable Node, Wallet, Mining & Public P2P Network
 
 Consensus v3 — FINAL / FROZEN
@@ -159,3 +160,4 @@ There is:
 The rules are enforced by code, not humans.
 
 ⛓ Satoshi-Nakamoto-ITL — Bitcoin v0.3.3
+
