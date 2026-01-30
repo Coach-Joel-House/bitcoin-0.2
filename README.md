@@ -33,9 +33,9 @@ and validation requirements are defined here:
 Any change to the specification constitutes a hard fork.
 
 Generated HTML documentation can be produced with:
-
+```
 cargo doc --no-deps
-
+```
 ---
 
 ## Consensus Status
@@ -128,3 +128,4 @@ There is:
 Time is the final judge.
 
 ## ⛓ Satoshi-Nakamoto
+
