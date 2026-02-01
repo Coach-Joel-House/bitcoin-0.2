@@ -18,10 +18,9 @@ use crate::{
     block::{Block, BlockHeader},
     utxo::{UTXOSet, UTXO},
     transaction::{Transaction, TxInput, TxOutput},
-    reward::block_reward,
     revelation::revelation_tx,
     merkle::merkle_root,
-    validation::validate_transaction,
+    
 };
 
 #[allow(dead_code)]
